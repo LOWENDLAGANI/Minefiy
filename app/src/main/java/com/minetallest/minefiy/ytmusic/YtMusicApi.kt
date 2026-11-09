@@ -135,7 +135,7 @@ class YtMusicApi(
     }
 
     /** Best-effort FastAPI `detail`, falling back to the raw body. */
-    private fun io.ktor.client.statement.HttpResponse.errorDetail(json: Json): String {
+    private suspend fun io.ktor.client.statement.HttpResponse.errorDetail(json: Json): String {
         val raw = runCatching { bodyAsText() }.getOrNull().orEmpty()
         return runCatching { json.decodeFromString<YtErrorDto>(raw).detail }.getOrNull()
             ?: raw.takeIf { it.isNotBlank() }

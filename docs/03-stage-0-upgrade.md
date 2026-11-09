@@ -106,3 +106,36 @@ If the first build fails, the likely suspects in order: Kotlin/Gradle pairing, C
 - [ ] Commit as `chore: stage0 upgrade to SDK35 Kotlin2.2 Media3 1.7` (squashed per sub-PR)
 
 > Do not start Stage 1 until 0.1–0.8 all green. Upgrading after YTM code causes conflicts.
+
+---
+
+## Post-upgrade correction 2026-11-09 — Compose BOM must be 2026.06.01, not 2026.09.00
+
+The first real compile of this project (JDK 17.0.21 + SDK 36 + AGP 8.13.2) failed in
+`checkDebugAarMetadata`, not in Kotlin:
+
+```
+Dependency 'androidx.compose.animation:animation-core-android:1.12.1' requires
+  libraries and applications that depend on it to compile against version 37 or later
+Dependency '...:1.12.1' requires Android Gradle plugin 9.1.0 or higher
+```
+
+11 Compose artifacts from BOM `2026.09.00` (Compose 1.12.1) demand **compileSdk 37 +
+AGP 9.1.0**. AGP 8.13.2 tops out at compileSdk 36, so the pair is simply incompatible.
+
+Checked every recent BOM's `aar-metadata.properties` (`minCompileSdk` / `minAGP`):
+
+| BOM | Compose | minCompileSdk | minAGP |
+|-----|---------|---------------|--------|
+| 2026.09.00 | 1.12.1 | **37** | **9.1.0** |
+| 2026.08.00 | 1.12.0 | 37 | 9.1.0 |
+| **2026.06.01** | **1.11.4** | **35** | **8.6.0** |
+| 2026.04.01 | 1.11.0 | 35 | 8.6.0 |
+| 2026.03.00 | 1.10.5 | 35 | 8.6.0 |
+
+`composeBom = "2026.06.01"` is the newest BOM that works with AGP 8.13.2 / SDK 36.
+Moving to 1.12.x instead would require AGP 9.1 + compileSdk 37 + a Gradle 9 upgrade —
+a separate, larger migration.
+
+**Lesson for future bumps:** verify an AAR's `aar-metadata.properties`, not just that the
+Maven coordinate returns HTTP 200. A coordinate can exist and still be unusable.

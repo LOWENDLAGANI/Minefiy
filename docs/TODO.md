@@ -111,3 +111,11 @@ Copy to GitHub Issues per stage. Check off as you go.
 - [x] `10-risks-legal-cost.md`
 - [x] `11-data-source-preference.md`
 - [x] `local.properties.example` at repo root
+
+## First successful compile (2026-11-09)
+
+- [x] `./gradlew :app:assembleDebug` → **BUILD SUCCESSFUL**, `app-debug.apk` (35.7 MB)
+- [x] Root cause of the CI failure: Compose BOM 2026.09.00 needs compileSdk 37 + AGP 9.1.0; pinned to 2026.06.01 (see docs/03)
+- [x] Kotlin fixes found by that build: `MediaMetadata.KEY_ALBUM_NAME` does not exist; `YtMusicApi.errorDetail()` had to be `suspend`
+- [x] Verified on a real toolchain (JDK 17.0.21, SDK 36, AGP 8.13.2, Gradle 8.14.3) — not just by reading code
+- [ ] On-device run: playback, radio, lyrics, liked songs

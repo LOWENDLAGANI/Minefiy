@@ -516,10 +516,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             ).apply {
                                 putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, song.title)
                                 putString(com.google.android.gms.cast.MediaMetadata.KEY_ARTIST, song.artist)
-                                putString(
-                                    com.google.android.gms.cast.MediaMetadata.KEY_ALBUM_NAME,
-                                    song.album ?: "YouTube Music"
-                                )
+                                // The Cast SDK exposes title/artist keys but no album-name
+                                // key (KEY_ALBUM_NAME does not exist), so the receiver shows
+                                // title + artist + artwork only.
                                 song.artworkUrl?.let { url ->
                                     addImage(com.google.android.gms.common.images.WebImage(Uri.parse(url)))
                                 }
