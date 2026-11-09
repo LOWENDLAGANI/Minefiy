@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PauseCircleFilled
 import androidx.compose.material.icons.filled.PlayCircleFilled
 import androidx.compose.material.icons.filled.Repeat
@@ -29,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,6 +46,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
@@ -62,6 +66,10 @@ fun FullScreenPlayer(viewModel: MainViewModel, onCollapse: () -> Unit) {
     val totalDuration by viewModel.totalDuration.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     var showAddToPlaylistDialog by remember { mutableStateOf(false) }
+    var showLyrics by remember { mutableStateOf(false) }
+    val currentYtSong by viewModel.currentYtSong.collectAsState()
+    val ytQueue by viewModel.ytQueue.collectAsState()
+    val ytFavorites by viewModel.ytFavorites.collectAsState()
 
     currentSong?.let { song ->
         Column(
@@ -81,6 +89,21 @@ fun FullScreenPlayer(viewModel: MainViewModel, onCollapse: () -> Unit) {
                     Icon(Icons.Default.Close, contentDescription = "Collapse", tint = Color.White)
                 }
                 Text("Now Playing", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                currentYtSong?.let { yt ->
+                    val isFavorite = ytFavorites.any { it.videoId == yt.videoId }
+                    IconButton(onClick = { viewModel.toggleYtFavorite(yt) }) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Default.Favorite
+                            else Icons.Default.FavoriteBorder,
+                            contentDescription = if (isFavorite) {
+                                "Remove from liked songs"
+                            } else {
+                                "Add to liked songs"
+                            },
+                            tint = if (isFavorite) MaterialTheme.colorScheme.primary else Color.White,
+                        )
+                    }
+                }
                 IconButton(onClick = { showAddToPlaylistDialog = true }) {
                     Icon(Icons.Default.AddCircleOutline, contentDescription = "Add to playlist", tint = Color.White)
                 }
@@ -113,6 +136,11 @@ fun FullScreenPlayer(viewModel: MainViewModel, onCollapse: () -> Unit) {
                     fontSize = 18.sp,
                     color = Color.LightGray
                 )
+                currentYtSong?.let {
+                    TextButton(onClick = { showLyrics = true }) {
+                        Text("Lyrics", color = Color.White)
+                    }
+                }
             }
 
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -174,8 +202,30 @@ fun FullScreenPlayer(viewModel: MainViewModel, onCollapse: () -> Unit) {
                     )
                 }
             }
+            if (ytQueue.isNotEmpty()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Up next", color = Color.White, fontWeight = FontWeight.Bold)
+                    ytQueue.take(3).forEach { next ->
+                        Text(
+                            text = "${next.title} • ${next.artist}",
+                            color = Color.LightGray,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    if (showLyrics && currentYtSong != null) {
+        LyricsDialog(
+            song = currentYtSong!!,
+            viewModel = viewModel,
+            onDismiss = { showLyrics = false },
+        )
     }
 
     if (showAddToPlaylistDialog) {

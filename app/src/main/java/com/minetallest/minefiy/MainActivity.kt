@@ -200,7 +200,16 @@ class MainActivity : FragmentActivity() {
                                         },
                                         onOpenYtArtist = { channelId ->
                                             navController.navigate("yt-artist/$channelId")
+                                        },
+                                        onOpenFavorites = {
+                                            navController.navigate("yt-favorites")
                                         }
+                                    )
+                                }
+                                composable("yt-favorites") {
+                                    YtFavoritesScreen(
+                                        viewModel = viewModel,
+                                        onBack = { navController.popBackStack() }
                                     )
                                 }
                                 composable(

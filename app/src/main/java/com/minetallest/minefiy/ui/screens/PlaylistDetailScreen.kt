@@ -42,7 +42,6 @@ import com.minetallest.minefiy.ui.viewmodels.MainViewModel
 @Composable
 fun PlaylistDetailScreen(playlistId: String, viewModel: MainViewModel) {
     val playlists by viewModel.playlists.collectAsState()
-    val songs by viewModel.songs.collectAsState()
 
     val currentPlaylist = playlists.find { it.id == playlistId }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -60,8 +59,9 @@ fun PlaylistDetailScreen(playlistId: String, viewModel: MainViewModel) {
 
     Box(modifier = Modifier.fillMaxSize()) {
         currentPlaylist?.let { playlist ->
-            val playlistSongs = playlist.items.mapNotNull { songId ->
-                songs.find { song -> song.key == songId }
+            // Mixed playlists: B2 keys and `yt:` ids both resolve here.
+            val playlistSongs = playlist.items.mapNotNull { mediaId ->
+                viewModel.songForMediaId(mediaId)
             }
 
             Column(modifier = Modifier.fillMaxSize()) {

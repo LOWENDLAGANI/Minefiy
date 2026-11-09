@@ -9,6 +9,7 @@ import com.minetallest.minefiy.data.Artist
 import com.minetallest.minefiy.data.Song
 import com.minetallest.minefiy.data.SongSelection
 import com.minetallest.minefiy.playback.Playlist
+import com.minetallest.minefiy.ytmusic.YtSong
 import kotlinx.coroutines.tasks.await
 
 class FirebaseManager {
@@ -19,6 +20,65 @@ class FirebaseManager {
 
     companion object {
         const val LIKED_SONGS_PLAYLIST_ID = "liked_songs"
+        private const val YT_FAVORITES = "ytFavorites"
+    }
+
+    /**
+     * YouTube favorites live outside the `songs` collection because they are not
+     * uploaded files. Shape: `users/{uid}/ytFavorites/{videoId}`.
+     *
+     * Read manually rather than with `toObjects`: the document id *is* the
+     * videoId, and manual mapping avoids needing a no-arg data class.
+     */
+    suspend fun getYtFavorites(): List<YtSong> {
+        val uid = auth.currentUser?.uid ?: return emptyList()
+        return try {
+            db.collection("users").document(uid).collection(YT_FAVORITES)
+                .get().await()
+                .documents
+                .mapNotNull { doc ->
+                    val title = doc.getString("title") ?: return@mapNotNull null
+                    // Newest first; `savedAt` is written by addYtFavorite above.
+                    (doc.getLong("savedAt") ?: 0L) to YtSong(
+                        videoId = doc.getString("videoId") ?: doc.id,
+                        title = title,
+                        artist = doc.getString("artist") ?: "Unknown Artist",
+                        album = doc.getString("album"),
+                        durationSeconds = doc.getLong("durationSeconds")?.toInt(),
+                        artworkUrl = doc.getString("artworkUrl"),
+                    )
+                }
+                .sortedByDescending { it.first }
+                .map { it.second }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun addYtFavorite(song: YtSong) {
+        val uid = auth.currentUser?.uid ?: return
+        db.collection("users").document(uid).collection(YT_FAVORITES)
+            .document(song.videoId)
+            .set(
+                mapOf(
+                    "videoId" to song.videoId,
+                    "title" to song.title,
+                    "artist" to song.artist,
+                    "album" to song.album,
+                    "durationSeconds" to song.durationSeconds,
+                    "artworkUrl" to song.artworkUrl,
+                    "savedAt" to System.currentTimeMillis(),
+                ),
+            )
+            .await()
+    }
+
+    suspend fun removeYtFavorite(videoId: String) {
+        val uid = auth.currentUser?.uid ?: return
+        db.collection("users").document(uid).collection(YT_FAVORITES)
+            .document(videoId)
+            .delete()
+            .await()
     }
 
     init {

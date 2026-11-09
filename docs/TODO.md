@@ -60,6 +60,19 @@ Copy to GitHub Issues per stage. Check off as you go.
 
 ## Stage 5 — Queue / Lyrics / Favorites
 
+- [x] Radio auto-queue: `startYtQueue()` + `enqueueYtRadio()` (`/watch?radio=true`, limit 10)
+- [x] `ytQueue` state + "Up next" (3 rows) in `FullScreenPlayer`
+- [x] Lyrics: `LyricsDialog` + per-videoId cache, browseId resolved via `/watch`
+- [x] Favorites: `users/{uid}/ytFavorites` + `toggleYtFavorite()` + hearts + `yt-favorites` screen
+- [x] Album/artist Play + Shuffle (`playYtAlbum`, `playYtArtist`)
+- [x] Mixed playlists: `playMediaIds()` + `songForMediaId()` in `PlaylistDetailScreen`
+- [x] Mixed history: `historyKeys` + `refreshHistory()`
+- [x] Static checks: 80 `viewModel.*` refs resolve, 11 files balanced, `resetYtState()` in `logout()`
+- [ ] Firestore rules for `users/{uid}/ytFavorites/**` — verify before shipping
+- [ ] `./gradlew :app:assembleDebug` — NOT RUN (no JDK/SDK)
+- [ ] On-device: radio continues after a track, lyrics, heart persists, mixed playlist plays
+
+
 - [ ] Radio: `GET /watch/{id}` → append 5 songs on track end
 - [ ] Lyrics: `GET /lyrics/{id}` → `LyricsScreen.kt`
 - [ ] Favorites: `FirebaseManager` `users/{uid}/ytFavorites`, heart toggle

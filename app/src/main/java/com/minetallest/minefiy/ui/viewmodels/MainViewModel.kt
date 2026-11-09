@@ -172,6 +172,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _ytMessage = MutableStateFlow<String?>(null)
     val ytMessage: StateFlow<String?> = _ytMessage.asStateFlow()
 
+    // --- YouTube Music (Stage 5): favorites, radio queue, lyrics ---
+    private val _ytFavorites = MutableStateFlow<List<YtSong>>(emptyList())
+    val ytFavorites: StateFlow<List<YtSong>> = _ytFavorites.asStateFlow()
+
+    private val _ytQueue = MutableStateFlow<List<YtSong>>(emptyList())
+    val ytQueue: StateFlow<List<YtSong>> = _ytQueue.asStateFlow()
+
+    private val _currentYtSong = MutableStateFlow<YtSong?>(null)
+    val currentYtSong: StateFlow<YtSong?> = _currentYtSong.asStateFlow()
+
+    private val _ytLyricsState = MutableStateFlow<YtUiState<String>>(YtUiState.Idle)
+    val ytLyricsState: StateFlow<YtUiState<String>> = _ytLyricsState.asStateFlow()
+
+    private val lyricsCache = ConcurrentHashMap<String, String>()
+    private var ytRadioJob: Job? = null
+
+    /** Raw history keys, so history rows can be re-mapped once YT metadata arrives. */
+    private var historyKeys: List<String> = emptyList()
+
     val isYtConfigured: Boolean
         get() = ytMusicApi.isConfigured
 
@@ -372,10 +391,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _newlyAddedSongs.value = emptyList()
         _listeningHistory.value = emptyList()
         _currentSong.value = null
-        ytSearchJob?.cancel()
-        _ytSearchState.value = YtUiState.Idle
-        _ytAlbumState.value = YtUiState.Idle
-        _ytArtistState.value = YtUiState.Idle
+        resetYtState()
     }
 
     fun onSearchQueryChange(query: String) {
@@ -478,8 +494,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * `onAddMediaItems`, exactly as it does for B2 keys. Cast has to resolve
      * eagerly because the remote player needs a URL in the load request.
      */
-    fun playYtSong(song: YtSong) {
-        rememberYtSongs(listOf(song))
+    fun playYtSong(song: YtSong, queue: List<YtSong> = emptyList()) {
+        // The tapped track always leads; the surrounding list (album, artist,
+        // search results, favorites) becomes the queue so skip-next works.
+        val tracks = buildList {
+            add(song)
+            queue.filter { it.videoId != song.videoId }.forEach { add(it) }
+        }
+        rememberYtSongs(tracks)
 
         if (castSession != null && castSession!!.isConnected) {
             viewModelScope.launch {
@@ -511,12 +533,161 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         } else {
-            val mediaController = mediaControllerFuture.get() ?: return
-            mediaController.setMediaItems(listOf(song.toMediaItem()), 0, 0)
-            mediaController.prepare()
-            mediaController.play()
-            _currentSong.value = song.toSong()
+            startYtQueue(tracks)
         }
+    }
+
+    // --- Stage 5: album/artist playback, radio, favorites, lyrics ---
+
+    private fun startYtQueue(tracks: List<YtSong>, startIndex: Int = 0) {
+        if (tracks.isEmpty()) return
+        rememberYtSongs(tracks)
+        val start = startIndex.coerceIn(0, tracks.lastIndex)
+        _ytQueue.value = tracks.drop(start + 1)
+        _currentYtSong.value = tracks[start]
+        _currentSong.value = tracks[start].toSong()
+
+        val mediaController = mediaControllerFuture.get() ?: return
+        mediaController.setMediaItems(tracks.map { it.toMediaItem() }, start, 0)
+        mediaController.prepare()
+        mediaController.play()
+
+        enqueueYtRadio(seed = tracks[start], exclude = tracks.map { it.videoId }.toSet())
+    }
+
+    /**
+     * Appends "up next" tracks from YouTube's radio for the seed video.
+     * Best effort: failure only means no auto-queue, never an error dialog.
+     */
+    private fun enqueueYtRadio(seed: YtSong, exclude: Set<String>) {
+        if (!ytMusicApi.isConfigured) return
+        ytRadioJob?.cancel()
+        ytRadioJob = viewModelScope.launch {
+            try {
+                val radio = ytMusicApi.getQueue(seed.videoId, limit = YT_RADIO_LIMIT, radio = true)
+                    .filter { it.videoId !in exclude }
+                    .distinctBy { it.videoId }
+                if (radio.isEmpty()) return@launch
+                rememberYtSongs(radio)
+                mediaControllerFuture.get()?.addMediaItems(radio.map { it.toMediaItem() })
+                _ytQueue.value = _ytQueue.value + radio
+            } catch (e: YtNotConfiguredException) {
+                // Search still works; radio is simply unavailable.
+            } catch (e: Exception) {
+                Log.d("MainViewModel", "Radio queue unavailable for ${seed.videoId}: ${e.message}")
+            }
+        }
+    }
+
+    fun playYtAlbum(album: YtAlbum, shuffle: Boolean = false) {
+        val tracks = if (shuffle) album.tracks.shuffled() else album.tracks
+        if (tracks.isEmpty()) {
+            _ytMessage.value = "This album has no playable tracks"
+            return
+        }
+        startYtQueue(tracks)
+    }
+
+    fun playYtArtist(artist: YtArtist, shuffle: Boolean = false) {
+        val tracks = if (shuffle) artist.topSongs.shuffled() else artist.topSongs
+        if (tracks.isEmpty()) {
+            _ytMessage.value = "This artist has no top songs to play"
+            return
+        }
+        startYtQueue(tracks)
+    }
+
+    fun loadYtFavorites() {
+        if (!firebaseManager.isUserLoggedIn()) return
+        viewModelScope.launch {
+            val favorites = runCatching { firebaseManager.getYtFavorites() }.getOrElse { emptyList() }
+            rememberYtSongs(favorites)
+            _ytFavorites.value = favorites
+            refreshHistory()
+        }
+    }
+
+    fun toggleYtFavorite(song: YtSong) {
+        if (!firebaseManager.isUserLoggedIn()) {
+            _ytMessage.value = "Sign in to save liked songs"
+            return
+        }
+        viewModelScope.launch {
+            val wasFavorite = _ytFavorites.value.any { it.videoId == song.videoId }
+            try {
+                if (wasFavorite) {
+                    firebaseManager.removeYtFavorite(song.videoId)
+                    _ytFavorites.value = _ytFavorites.value.filterNot { it.videoId == song.videoId }
+                } else {
+                    firebaseManager.addYtFavorite(song)
+                    rememberYtSongs(listOf(song))
+                    _ytFavorites.value = listOf(song) + _ytFavorites.value
+                }
+                _ytMessage.value = if (wasFavorite) "Removed from liked songs" else "Added to liked songs"
+            } catch (e: Exception) {
+                Log.w("MainViewModel", "Liked-song toggle failed for ${song.videoId}", e)
+                _ytMessage.value = "Could not update liked songs"
+            }
+        }
+    }
+
+    fun loadYtLyrics(song: YtSong) {
+        if (!ytMusicApi.isConfigured) {
+            _ytLyricsState.value = YtUiState.NotConfigured
+            return
+        }
+        lyricsCache[song.videoId]?.let {
+            _ytLyricsState.value = YtUiState.Success(it)
+            return
+        }
+        val cached = _ytLyricsState.value
+        if (cached is YtUiState.Loading) return
+        viewModelScope.launch {
+            _ytLyricsState.value = YtUiState.Loading
+            _ytLyricsState.value = try {
+                val browseId = ytMusicApi.getLyricsBrowseId(song.videoId)
+                val text = browseId?.takeIf { it.isNotBlank() }?.let { ytMusicApi.getLyrics(it) }
+                if (text.isNullOrBlank()) {
+                    YtUiState.Error("No lyrics available for this track")
+                } else {
+                    lyricsCache[song.videoId] = text
+                    YtUiState.Success(text)
+                }
+            } catch (e: YtNotConfiguredException) {
+                YtUiState.NotConfigured
+            } catch (e: Exception) {
+                Log.w("MainViewModel", "Lyrics failed for ${song.videoId}", e)
+                YtUiState.Error(e.message ?: "Could not load lyrics")
+            }
+        }
+    }
+
+    fun clearYtLyrics() {
+        _ytLyricsState.value = YtUiState.Idle
+    }
+
+    /** Resolves a stored media id (B2 key or `yt:` id) to something displayable. */
+    fun songForMediaId(mediaId: String): Song? =
+        if (YtSong.isYouTubeMediaId(mediaId)) ytSongsById[mediaId]?.toSong()
+        else _songs.value.find { it.key == mediaId }
+
+    private fun refreshHistory() {
+        _listeningHistory.value = historyKeys.mapNotNull { songForMediaId(it) }
+    }
+
+    private fun resetYtState() {
+        ytSearchJob?.cancel()
+        ytRadioJob?.cancel()
+        _ytSearchState.value = YtUiState.Idle
+        _ytAlbumState.value = YtUiState.Idle
+        _ytArtistState.value = YtUiState.Idle
+        _ytFavorites.value = emptyList()
+        _ytQueue.value = emptyList()
+        _currentYtSong.value = null
+        _ytLyricsState.value = YtUiState.Idle
+        lyricsCache.clear()
+        historyKeys = emptyList()
+        ytSongsById.clear()
     }
 
     fun showYtMessage(message: String) {
@@ -543,6 +714,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val YT_SEARCH_LIMIT = 20
         const val YT_SEARCH_DEBOUNCE_MS = 300L
+        const val YT_RADIO_LIMIT = 10
+        const val YT_HISTORY_LIMIT = 20
     }
 
     private fun loadInitialData() {
@@ -575,6 +748,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             loadPlaylists()
             _loadingMessage.value = "Loading history..."
             loadListeningHistory()
+            _loadingMessage.value = "Loading liked songs..."
+            loadYtFavorites()
             _loadingMessage.value = "Loading selections..."
             loadSongSelections()
             _isInitiallyLoading.value = false
@@ -605,10 +780,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadListeningHistory() {
         viewModelScope.launch {
-            val historyKeys = firebaseManager.getListeningHistory()
-            _listeningHistory.value = historyKeys.mapNotNull { key ->
-                _songs.value.find { it.key == key }
-            }
+            historyKeys = firebaseManager.getListeningHistory()
+            refreshHistory()
         }
     }
 
@@ -618,18 +791,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun addToHistory(songId: String) {
+    private fun addToHistory(mediaId: String) {
+        // `mediaId` is a B2 key or a `yt:` id, so history is mixed-source aware.
+        val updated = (listOf(mediaId) + historyKeys.filterNot { it == mediaId })
+            .take(YT_HISTORY_LIMIT)
+        historyKeys = updated
+        refreshHistory()
         viewModelScope.launch {
-            val currentHistory = _listeningHistory.value.map { it.key }.toMutableList()
-            if (currentHistory.contains(songId)) {
-                currentHistory.remove(songId)
-            }
-            currentHistory.add(0, songId)
-            val updatedHistory = currentHistory.take(20)
-            firebaseManager.saveListeningHistory(updatedHistory)
-            _listeningHistory.value = updatedHistory.mapNotNull { key ->
-                _songs.value.find { it.key == key }
-            }
+            runCatching { firebaseManager.saveListeningHistory(updated) }
         }
     }
 
@@ -733,29 +902,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playPlaylist(playlist: Playlist) {
-        val playlistSongs = playlist.items.mapNotNull { songId ->
-            _songs.value.find { it.key == songId }
-        }
-
-        if (playlistSongs.isNotEmpty()) {
-            val mediaController = mediaControllerFuture.get() ?: return
-            mediaController.setMediaItems(playlistSongs.map { it.toMediaItem() })
-            mediaController.prepare()
-            mediaController.play()
-        }
+        playMediaIds(playlist.items)
     }
 
     fun playPlaylistShuffled(playlist: Playlist) {
-        val playlistSongs = playlist.items.mapNotNull { songId ->
-            _songs.value.find { it.key == songId }
-        }.shuffled()
+        playMediaIds(playlist.items.shuffled())
+    }
 
-        if (playlistSongs.isNotEmpty()) {
-            val mediaController = mediaControllerFuture.get() ?: return
-            mediaController.setMediaItems(playlistSongs.map { it.toMediaItem() })
-            mediaController.prepare()
-            mediaController.play()
+    /** Plays any mix of B2 keys and `yt:` ids in one queue (Stage 5.5). */
+    private fun playMediaIds(mediaIds: List<String>) {
+        val items = mediaIds.mapNotNull { mediaId ->
+            if (YtSong.isYouTubeMediaId(mediaId)) ytSongsById[mediaId]?.toMediaItem()
+            else _songs.value.find { it.key == mediaId }?.toMediaItem()
         }
+        if (items.isEmpty()) return
+        val mediaController = mediaControllerFuture.get() ?: return
+        mediaController.setMediaItems(items)
+        mediaController.prepare()
+        mediaController.play()
     }
 
     fun syncSongs() {
@@ -789,16 +953,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _shuffleModeEnabled.value = mediaController.shuffleModeEnabled
         _repeatMode.value = mediaController.repeatMode
         _totalDuration.value = mediaController.duration.coerceAtLeast(0L)
-        mediaController.currentMediaItem?.mediaId?.let { mediaId ->
-            _currentSong.value = if (YtSong.isYouTubeMediaId(mediaId)) {
-                ytSongsById[mediaId]?.toSong()
-            } else {
-                _songs.value.find { song -> song.key == mediaId }
-            }
+        val currentMediaId = mediaController.currentMediaItem?.mediaId
+        _currentYtSong.value = currentMediaId
+            ?.takeIf { YtSong.isYouTubeMediaId(it) }
+            ?.let { ytSongsById[it] }
+        currentMediaId?.let { mediaId ->
+            _currentSong.value = songForMediaId(mediaId)
         }
     }
 
     fun playSong(song: Song) {
+        // Mixed playlists store `yt:` ids; route those through the YT queue.
+        if (YtSong.isYouTubeMediaId(song.key)) {
+            ytSongsById[song.key]?.let {
+                playYtSong(it)
+                return
+            }
+        }
         val songIndex = _songs.value.indexOfFirst { it.key == song.key }
         if (songIndex == -1) return
 

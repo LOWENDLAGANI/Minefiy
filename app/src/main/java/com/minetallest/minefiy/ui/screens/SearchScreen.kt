@@ -19,6 +19,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,6 +48,7 @@ fun SearchScreen(
     onArtistClick: (String) -> Unit,
     onOpenYtAlbum: (String) -> Unit = {},
     onOpenYtArtist: (String) -> Unit = {},
+    onOpenFavorites: () -> Unit = {},
 ) {
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
@@ -110,6 +112,7 @@ fun SearchScreen(
                     query = searchQuery,
                     onOpenAlbum = onOpenYtAlbum,
                     onOpenArtist = onOpenYtArtist,
+                    onOpenFavorites = onOpenFavorites,
                 )
             } else {
                 LibraryResults(
@@ -159,7 +162,10 @@ private fun YouTubeResults(
     query: String,
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenFavorites: () -> Unit,
 ) {
+    val ytFavorites by viewModel.ytFavorites.collectAsState()
+
     Column(modifier = Modifier.fillMaxSize()) {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -193,6 +199,8 @@ private fun YouTubeResults(
                                 is YtSearchItem.Song -> YtSongRow(
                                     song = item.song,
                                     onClick = { viewModel.playYtSong(item.song) },
+                                    isFavorite = ytFavorites.any { it.videoId == item.song.videoId },
+                                    onToggleFavorite = { viewModel.toggleYtFavorite(item.song) },
                                 )
 
                                 is YtSearchItem.Album -> YtAlbumRow(
@@ -223,15 +231,22 @@ private fun YouTubeResults(
                     .padding(24.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = if (query.isBlank()) {
-                        "Search YouTube Music for songs, albums, artists and playlists."
-                    } else {
-                        "Press search to look up \"$query\""
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = if (query.isBlank()) {
+                            "Search YouTube Music for songs, albums, artists and playlists."
+                        } else {
+                            "Press search to look up \"$query\""
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                    if (ytFavorites.isNotEmpty()) {
+                        TextButton(onClick = onOpenFavorites) {
+                            Text("Liked songs (${ytFavorites.size})")
+                        }
+                    }
+                }
             }
 
             else -> YtStatePlaceholder(

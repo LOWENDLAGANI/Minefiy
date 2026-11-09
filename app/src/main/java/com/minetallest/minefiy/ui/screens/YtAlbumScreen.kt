@@ -1,5 +1,6 @@
 package com.minetallest.minefiy.ui.screens
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,7 +11,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -60,6 +67,8 @@ fun YtAlbumScreen(
 
 @Composable
 private fun AlbumContent(album: YtAlbum, viewModel: MainViewModel) {
+    val favorites by viewModel.ytFavorites.collectAsState()
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             Row(
@@ -97,11 +106,39 @@ private fun AlbumContent(album: YtAlbum, viewModel: MainViewModel) {
             }
         }
 
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Button(
+                    onClick = { viewModel.playYtAlbum(album) },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Play")
+                }
+                OutlinedButton(
+                    onClick = { viewModel.playYtAlbum(album, shuffle = true) },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.Shuffle, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Shuffle")
+                }
+            }
+        }
+
         itemsIndexed(album.tracks) { index, track ->
             YtSongRow(
                 song = track,
                 trackNumber = index + 1,
-                onClick = { viewModel.playYtSong(track) },
+                onClick = { viewModel.playYtSong(track, album.tracks) },
+                isFavorite = favorites.any { it.videoId == track.videoId },
+                onToggleFavorite = { viewModel.toggleYtFavorite(track) },
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }

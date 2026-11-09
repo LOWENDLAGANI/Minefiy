@@ -15,6 +15,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,6 +68,8 @@ fun YtSongRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     trackNumber: Int? = null,
+    isFavorite: Boolean? = null,
+    onToggleFavorite: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -106,6 +110,21 @@ fun YtSongRow(
                 text = formatDuration(seconds),
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
+        if (onToggleFavorite != null) {
+            IconButton(onClick = onToggleFavorite) {
+                Icon(
+                    imageVector = if (isFavorite == true) Icons.Default.Favorite
+                    else Icons.Default.FavoriteBorder,
+                    contentDescription = if (isFavorite == true) {
+                        "Remove from liked songs"
+                    } else {
+                        "Add to liked songs"
+                    },
+                    tint = if (isFavorite == true) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
