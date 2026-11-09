@@ -1,0 +1,15 @@
+# Copy to local.properties and fill with real values.
+# NEVER commit local.properties (already in .gitignore)
+# Required for a fresh clone to build.
+
+# --- Backblaze B2 (existing library) ---
+b2.access.key.id=YOUR_B2_KEY_ID
+b2.secret.access.key=YOUR_B2_SECRET
+b2.bucket.name=minefiy-music
+b2.endpoint=https://f001.backblazeb2.com
+admin.email=admin@example.com
+
+# --- YouTube Music proxy (Stage 1+) ---
+# Cloud Run URL from `gcloud run deploy minefiy-yt --source ./yt-proxy`
+# Leave empty until Stage 1 is deployed — app will show "Not configured" in YouTube tab
+yt.proxy.base.url=
