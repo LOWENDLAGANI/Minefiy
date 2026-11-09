@@ -47,7 +47,12 @@ gcloud config set project YOUR_PROJECT_ID
 
 The script is idempotent: it enables `run.googleapis.com` + `cloudbuild.googleapis.com`,
 builds the Dockerfile with Cloud Build, deploys, smoke-tests `/health` and `/search`,
-and prints the `local.properties` line. Override any knob with an env var:
+then **writes the deployed URL into `local.properties`** as `yt.proxy.base.url`
+(touching only that one line, so B2 keys and `sdk.dir` survive) and prints it.
+Set `WRITE_LOCAL_PROPERTIES=false` to skip that, or set `LOCAL_PROPERTIES=...` to
+target a different file.
+
+Override any knob with an env var:
 
 ```bash
 REGION=europe-west1 MAX_INSTANCES=1 ./yt-proxy/deploy.sh

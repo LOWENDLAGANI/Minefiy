@@ -34,7 +34,14 @@ android {
         val b2BucketName = localProperties.getProperty("b2.bucket.name") ?: ""
         val b2Endpoint = localProperties.getProperty("b2.endpoint") ?: ""
         val adminEmail = localProperties.getProperty("admin.email") ?: ""
-        val ytProxyBaseUrl = localProperties.getProperty("yt.proxy.base.url") ?: ""
+        // Deployed yt-proxy origin. Precedence: -Pyt.proxy.base.url, then the
+        // YT_PROXY_BASE_URL env var, then local.properties. The override means a
+        // fresh deployment can be wired in without editing any file (CI, or
+        // `YT_PROXY_BASE_URL=$(...) ./gradlew assembleDebug`).
+        val ytProxyBaseUrl = (project.findProperty("yt.proxy.base.url") as String?)
+            ?: System.getenv("YT_PROXY_BASE_URL")
+            ?: localProperties.getProperty("yt.proxy.base.url")
+            ?: ""
 
         buildConfigField("String", "B2_ACCESS_KEY_ID", "\"$b2AccessKeyId\"")
         buildConfigField("String", "B2_SECRET_ACCESS_KEY", "\"$b2SecretAccessKey\"")

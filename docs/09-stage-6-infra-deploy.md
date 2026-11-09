@@ -166,3 +166,48 @@ Migrate `coil-compose:2.6.0` → `io.coil-kt.coil3:coil-compose:3.x`:
 
 - Modified: `.github/workflows/android.yml` (new), `README.md`, `yt-proxy/README.md`
 - Verified: `functions/index.js` (Gen1 vs Gen2 decision documented)
+
+---
+
+## Wiring the deployed URL into the app (2026-11-09)
+
+`deploy.sh` now writes the service URL straight into `local.properties` as
+`yt.proxy.base.url=https://…`, editing **only that line** so `sdk.dir` and any B2 keys
+survive. `WRITE_LOCAL_PROPERTIES=false` skips it; `LOCAL_PROPERTIES=<path>` retargets it.
+
+`app/build.gradle.kts` resolves the value with this precedence:
+
+1. `-Pyt.proxy.base.url=…`
+2. `YT_PROXY_BASE_URL` environment variable
+3. `local.properties`
+4. `""` (build still succeeds; `YtMusicApi.isConfigured` is false and the YouTube tab
+   shows the "not configured" state)
+
+The env override exists so a CI job or a one-off build can target a fresh deployment
+without touching a file:
+
+```bash
+YT_PROXY_BASE_URL=https://minefiy-yt-xxx.a.run.app ./gradlew :app:assembleDebug
+```
+
+### Verified with a stubbed `gcloud`, because no real deploy is possible here
+
+`gcloud` is not installed and there are no credentials or project in this environment
+(`~/.config/gcloud` absent, `GOOGLE_APPLICATION_CREDENTIALS` unset), so **nothing was
+deployed**. Instead a fake `gcloud` on `PATH` returned a canned service URL, and the
+whole path was exercised:
+
+| Check | Result |
+|---|---|
+| `deploy.sh` with stub gcloud | exit 0, wrote `yt.proxy.base.url=https://minefiy-yt-demo-uc.a.run.app` |
+| other keys preserved | `sdk.dir` and `b2.bucket.name` untouched |
+| second run | still exactly **1** `yt.proxy.base.url` line (no duplication) |
+| Gradle → BuildConfig | `YT_PROXY_BASE_URL = "https://minefiy-yt-demo-uc.a.run.app"` |
+| env override | `YT_PROXY_BASE_URL=…` wins over `local.properties` |
+| `WRITE_LOCAL_PROPERTIES=false` | file untouched, warning printed |
+| `./gradlew :app:assembleDebug` with the URL wired | BUILD SUCCESSFUL, 35.9 MB APK |
+
+A bug was caught by this exercise and fixed: a continuation line in the inserted comment
+had lost its leading `#`, so bash executed `touched,` and the script exited 127 before
+reaching the wiring block. `bash -n` does not catch that (it is valid syntax), only an
+actual run does.

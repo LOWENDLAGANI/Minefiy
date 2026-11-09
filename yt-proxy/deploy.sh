@@ -99,13 +99,33 @@ if [ "$SKIP_SMOKE_TEST" != "true" ]; then
   fi
 fi
 
+# Wire the URL into the Android build. Only the yt.proxy.base.url line is
+# touched, so existing B2 keys / sdk.dir survive.
+LOCAL_PROPERTIES="${LOCAL_PROPERTIES:-$SCRIPT_DIR/../local.properties}"
+if [ "${WRITE_LOCAL_PROPERTIES:-true}" = "true" ]; then
+  touch "$LOCAL_PROPERTIES"
+  if grep -qE '^yt\.proxy\.base\.url=' "$LOCAL_PROPERTIES"; then
+    sed -i.bak -E "s|^yt\.proxy\.base\.url=.*|yt.proxy.base.url=$URL|" "$LOCAL_PROPERTIES"
+    rm -f "$LOCAL_PROPERTIES.bak"
+  else
+    printf 'yt.proxy.base.url=%s\n' "$URL" >> "$LOCAL_PROPERTIES"
+  fi
+  info "Wired $LOCAL_PROPERTIES -> yt.proxy.base.url=$URL"
+else
+  warn "WRITE_LOCAL_PROPERTIES=false: not touching $LOCAL_PROPERTIES"
+fi
+
 cat <<EOF
 
 Deployed: $URL
 
-Point the app at it — add this to local.properties in the repo root:
+The app build now reads this from local.properties (rebuild to pick it up):
 
   yt.proxy.base.url=$URL
+
+To build without editing files instead:
+
+  YT_PROXY_BASE_URL=$URL ./gradlew :app:assembleDebug
 
 Logs:
   gcloud logging read 'resource.type=cloud_run_revision AND resource.labels.service_name=$SERVICE' \\
