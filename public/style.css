@@ -1,0 +1,34 @@
+body {
+    background-color: #00001a;
+    color: #FFFFFF;
+    overflow: hidden;
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+cast-media-player {
+    --theme-color: #FFFFFF;
+    --progress-color: #6200EE;
+    width: 100%;
+    height: 100%;
+}
+
+.watermark {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    opacity: 0.8;
+}
+
+.watermark h1 {
+    font-size: 24px;
+    margin: 0;
+}
+
+.watermark p {
+    font-size: 14px;
+    margin: 0;
+}

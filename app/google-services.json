@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "697006955149",
+    "project_id": "minefiy",
+    "storage_bucket": "minefiy.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:697006955149:android:19ab0f398ef18b2c2220c4",
+        "android_client_info": {
+          "package_name": "com.minetallest.minefiy"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "697006955149-pnmutirjo6englpkk1cji1gi1tkkv8e8.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.minetallest.minefiy",
+            "certificate_hash": "1b822a4adb0d3db4b9b187e728174c575e351536"
+          }
+        },
+        {
+          "client_id": "697006955149-9ofmnsmiuk9iofi3ju8hul187n6n5r22.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBS1Zilh0q6PtP8q2_APfKxmC6dmx_hSO8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "697006955149-9ofmnsmiuk9iofi3ju8hul187n6n5r22.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
