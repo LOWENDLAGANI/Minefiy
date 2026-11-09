@@ -81,12 +81,17 @@ Copy to GitHub Issues per stage. Check off as you go.
 
 ## Stage 6 — Infra / Harden
 
-- [ ] Cloud Run prod config (concurrency 80, timeout 60, memory 512Mi)
+- [x] `yt-proxy/deploy.sh` — idempotent Cloud Run deploy (APIs, build, deploy, smoke test, prints `local.properties` line)
+- [x] Prod config defaults: concurrency 80, timeout 60, memory 512Mi, max-instances 3, min-instances 0
+- [x] `yt-proxy/.gcloudignore` (no `.venv`, caches or logs uploaded)
+- [x] Dockerfile hardened: `--proxy-headers`, `--forwarded-allow-ips`, `--workers 1`, `PIP_NO_CACHE_DIR`, non-root uid 10001
+- [x] `yt-proxy/README.md`: deploy script, env-var table, `YTMUSIC_AUTH_FILE` secret mount, abuse/cost notes
+- [x] Runtime CMD verified locally (same flags, `$PORT` expansion) — build/image NOT verified (no Docker socket access)
+- [ ] **Run `./yt-proxy/deploy.sh`** — needs your `gcloud` login + project (not available here)
 - [ ] `functions/index.js` — keep Gen1 or migrate to Gen2 (document choice)
-- [ ] `local.properties` prod URL, `.gitignore` verified
 - [ ] GitHub Actions `./gradlew assembleDebug`, Dependabot
 - [ ] Uptime check `/health`, Cloud Logging review
-- [ ] Release APK sideload test on API 35 device, README + `yt-proxy/README.md` updated
+- [ ] Release APK sideload test on API 35 device
 
 ## Data Source Preference (B2 vs YouTube) — Implemented
 

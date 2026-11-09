@@ -1,0 +1,16 @@
+# Keep the Cloud Build upload small and free of local state.
+# Used by `gcloud run deploy --source` / `gcloud builds submit`.
+.gcloudignore
+.git
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.log
+local.properties
+deploy.sh
+README.md
+Dockerfile.dockerignore

@@ -1,5 +1,82 @@
 # Stage 6 — Infra, Deploy, Harden
 
+## APPLIED 2026-11-09 — deploy config + scripts only; nothing deployed
+
+Nothing in this stage was executed against GCP: `gcloud` is not installed in this
+sandbox and no project credentials exist. What is committed is the config and the
+scripts, plus local verification of everything that does not need a cloud account.
+
+### `yt-proxy/deploy.sh` (new, executable)
+
+```bash
+./yt-proxy/deploy.sh                 # defaults
+REGION=europe-west1 MAX_INSTANCES=1 ./yt-proxy/deploy.sh
+ALLOW_UNAUTH=false  ./yt-proxy/deploy.sh
+```
+
+- Fails fast with an actionable message if `gcloud` is missing, no account is active,
+  or no project is set (uses `gcloud config get-value project` unless `PROJECT_ID` is set).
+- Enables `run.googleapis.com` + `cloudbuild.googleapis.com` (idempotent).
+- `gcloud run deploy --source` so Cloud Build uses the Dockerfile; no local Docker needed.
+- Defaults: `512Mi` / `1` CPU, `0..3` instances, concurrency `80`, timeout `60`,
+  `CACHE_TTL_SECONDS=600`.
+- Smoke-tests `/health` (hard) and `/search?q=coldplay&…&limit=1` (soft: cold start or
+  upstream throttle only warns).
+- Resolves the service URL from `status.url` and prints the exact
+  `yt.proxy.base.url=…` line plus log/rollback/delete commands.
+
+### `yt-proxy/.gcloudignore` (new)
+
+Keeps `.venv`, `__pycache__`, logs, `local.properties` and the deploy script itself
+out of the Cloud Build upload. Note this matters more than usual: the local venv is
+hundreds of MB and `--source` would otherwise tar it.
+
+### `yt-proxy/Dockerfile` (hardened)
+
+- `CMD exec uvicorn … --port "${PORT}"` with **`--proxy-headers`** and
+  `--forwarded-allow-ips='*'`: Cloud Run terminates TLS at its own proxy, so without
+  this uvicorn logs the proxy IP and mis-detects the scheme.
+- `--workers 1` on purpose — Cloud Run scales by instances, and multiple uvicorn
+  workers would each keep a separate in-memory response cache (the naive
+  "workers = cores" tuning actively hurts this service).
+- `PIP_NO_CACHE_DIR=1` and non-root `uid 10001` already matched the previous image.
+
+### `yt-proxy/README.md`
+
+Deploy section rewritten around the script, with the env-var table, the manual
+`gcloud` equivalent, secret mounting for `YTMUSIC_AUTH_FILE`, and an explicit note
+that `--allow-unauthenticated` means anyone with the URL spends your quota.
+
+### Verification actually performed
+
+- `bash -n yt-proxy/deploy.sh` → syntax clean; file is executable.
+- `python3 -m ast` on `main.py` → parses.
+- The Dockerfile's exact runtime command was executed locally against the existing
+  venv, including `$PORT` expansion. Results: `/health` →
+  `{"ok":true,"ytmusicapi":"1.12.3",…}`; `/search?q=coldplay&filter=songs&limit=2`
+  → 2 live tracks ("Viva La Vida", "A Sky Full of Stars"); `X-Forwarded-Proto`/`-For`
+  headers accepted; bad filter → `400`.
+- The `/lyrics` probe returned **200**, not 404 — that track does have lyrics. The 404
+  path was verified in Stage 1 (`docs/04`), so it is not re-claimed here.
+
+### Verification NOT performed (explicit)
+
+- `docker build` — **could not run**: `/var/run/docker.sock` is permission-denied in
+  this sandbox, so the image was never built and no container ever ran. The flag
+  verification above proves the CMD is valid, not that the image is.
+- `gcloud run deploy` — no CLI, no credentials, no project. The first real deploy is
+  yours to run.
+
+### Before the first deploy
+
+1. `gcloud auth login && gcloud config set project <id>` (billing must be enabled).
+2. `./yt-proxy/deploy.sh` and keep the printed URL.
+3. Put it in `local.properties` as `yt.proxy.base.url=…` and rebuild the app —
+   `BuildConfig.YT_PROXY_BASE_URL` is a build-time constant, so a stale APK keeps
+   pointing at the old URL.
+4. Open `https://<url>/docs` once to confirm FastAPI is serving.
+
+
 > Goal: Production-ready, documented, cheap to run.
 
 ## 6.1 Cloud Run Production

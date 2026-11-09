@@ -40,6 +40,34 @@ curl -s "localhost:8000/search?q=random%20access%20memories&filter=albums&limit=
 ## Deploy to Cloud Run
 
 ```bash
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+./yt-proxy/deploy.sh
+```
+
+The script is idempotent: it enables `run.googleapis.com` + `cloudbuild.googleapis.com`,
+builds the Dockerfile with Cloud Build, deploys, smoke-tests `/health` and `/search`,
+and prints the `local.properties` line. Override any knob with an env var:
+
+```bash
+REGION=europe-west1 MAX_INSTANCES=1 ./yt-proxy/deploy.sh
+ALLOW_UNAUTH=false ./yt-proxy/deploy.sh     # private service (needs identity tokens)
+SKIP_SMOKE_TEST=true ./yt-proxy/deploy.sh
+```
+
+| Var | Default |
+|-----|---------|
+| `SERVICE` | `minefiy-yt` |
+| `REGION` | `us-central1` |
+| `MEMORY` / `CPU` | `512Mi` / `1` |
+| `MIN_INSTANCES` / `MAX_INSTANCES` | `0` / `3` |
+| `CONCURRENCY` / `TIMEOUT` | `80` / `60` |
+| `CACHE_TTL_SECONDS` | `600` |
+| `ALLOW_UNAUTH` | `true` |
+
+Manual equivalent, if you prefer plain `gcloud`:
+
+```bash
 gcloud run deploy minefiy-yt \
   --source ./yt-proxy \
   --region us-central1 \
@@ -54,6 +82,25 @@ Then put the printed URL into `local.properties` at the repo root:
 ```properties
 yt.proxy.base.url=https://minefiy-yt-xxxx-uc.a.run.app
 ```
+
+### Signed-in library (optional)
+
+`YTMUSIC_AUTH_FILE` is only needed for personal library access. Keep the file
+out of git and mount it as a secret:
+
+```bash
+gcloud secrets create ytmusic-auth --data-file=browser.json
+gcloud run services update minefiy-yt --region us-central1 \
+  --set-secrets /app/browser.json=ytmusic-auth:latest \
+  --set-env-vars YTMUSIC_AUTH_FILE=/app/browser.json
+```
+
+### Cost and abuse
+
+`--allow-unauthenticated` means anyone with the URL can spend your quota. The
+`MAX_INSTANCES=3` + `CONCURRENCY=80` defaults cap that. For a public deployment
+of your own, also consider a Cloud Armor rate limit or a shared-secret header
+(not implemented yet — see docs/09-stage-6-infra-deploy.md, 6.5).
 
 ## Configuration
 
