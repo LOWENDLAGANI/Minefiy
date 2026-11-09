@@ -67,6 +67,8 @@ fun NewHomeScreen(
     val featuredSongs by viewModel.featuredSongs.collectAsState()
     val listeningHistory by viewModel.listeningHistory.collectAsState()
     val displayName by viewModel.displayName.collectAsState()
+    val dataSource by viewModel.dataSource.collectAsState()
+    val isYouTube = dataSource == com.minetallest.minefiy.data.DataSource.YOUTUBE_MUSIC
 
     Scaffold(
         topBar = {
@@ -88,9 +90,25 @@ fun NewHomeScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            item { ArtistSection("Artist", artists, onArtistClick) }
-            item { SongSection("Today's hits", featuredSongs, viewModel) }
-            item { SongSection("Recently played", listeningHistory, viewModel) }
+            if (isYouTube) {
+                item {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
+                        Text(
+                            text = "You're using YouTube Music",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Your B2 library is saved. Switch to YouTube Music search in the Search tab, or change source in Settings.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            } else {
+                item { ArtistSection("Artist", artists, onArtistClick) }
+                item { SongSection("Today's hits", featuredSongs, viewModel) }
+                item { SongSection("Recently played", listeningHistory, viewModel) }
+            }
         }
     }
 }

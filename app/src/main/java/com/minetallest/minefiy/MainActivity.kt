@@ -68,7 +68,11 @@ class MainActivity : FragmentActivity() {
                 }
                 else {
                     val navController = rememberNavController()
-                    val startDestination = if (viewModel.isUserLoggedIn()) "home" else "login"
+                    val startDestination = when {
+                        !viewModel.isUserLoggedIn() -> "login"
+                        viewModel.needsDataSourceSelection() -> "choose-source"
+                        else -> "home"
+                    }
                     var showFullScreenPlayer by remember { mutableStateOf(false) }
                     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
                     val scope = rememberCoroutineScope()
@@ -138,10 +142,32 @@ class MainActivity : FragmentActivity() {
                     ) { paddingValues ->
                         Box(modifier = Modifier.padding(paddingValues)) {
                             NavHost(navController = navController, startDestination = startDestination) {
+                                composable("choose-source") {
+                                    DataSourceSelectionScreen(
+                                        viewModel = viewModel,
+                                        canGoBack = false,
+                                        onSelected = {
+                                            navController.navigate("home") {
+                                                popUpTo("choose-source") { inclusive = true }
+                                            }
+                                        }
+                                    )
+                                }
+                                composable("change-source") {
+                                    DataSourceSelectionScreen(
+                                        viewModel = viewModel,
+                                        canGoBack = true,
+                                        onBack = { navController.popBackStack() },
+                                        onSelected = { navController.popBackStack() }
+                                    )
+                                }
                                 composable("login") {
                                     LoginScreen(
                                         viewModel = viewModel,
-                                        onLoginSuccess = { navController.navigate("home") { popUpTo("login") { inclusive = true } } },
+                                        onLoginSuccess = {
+                                            val dest = if (viewModel.needsDataSourceSelection()) "choose-source" else "home"
+                                            navController.navigate(dest) { popUpTo("login") { inclusive = true } }
+                                        },
                                         onNavigateToRegister = { navController.navigate("register") }
                                     )
                                 }
@@ -164,9 +190,41 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
                                 composable("search") {
-                                    SearchScreen(viewModel = viewModel) { artistName ->
-                                        navController.navigate("artist/$artistName")
-                                    }
+                                    SearchScreen(
+                                        viewModel = viewModel,
+                                        onArtistClick = { artistName ->
+                                            navController.navigate("artist/$artistName")
+                                        },
+                                        onOpenYtAlbum = { browseId ->
+                                            navController.navigate("yt-album/$browseId")
+                                        },
+                                        onOpenYtArtist = { channelId ->
+                                            navController.navigate("yt-artist/$channelId")
+                                        }
+                                    )
+                                }
+                                composable(
+                                    "yt-album/{browseId}",
+                                    arguments = listOf(navArgument("browseId") { type = NavType.StringType })
+                                ) { backStackEntry ->
+                                    YtAlbumScreen(
+                                        browseId = backStackEntry.arguments?.getString("browseId") ?: "",
+                                        viewModel = viewModel,
+                                        onBack = { navController.popBackStack() }
+                                    )
+                                }
+                                composable(
+                                    "yt-artist/{channelId}",
+                                    arguments = listOf(navArgument("channelId") { type = NavType.StringType })
+                                ) { backStackEntry ->
+                                    YtArtistScreen(
+                                        channelId = backStackEntry.arguments?.getString("channelId") ?: "",
+                                        viewModel = viewModel,
+                                        onBack = { navController.popBackStack() },
+                                        onOpenAlbum = { browseId ->
+                                            navController.navigate("yt-album/$browseId")
+                                        }
+                                    )
                                 }
                                 composable(
                                     "playlist/{playlistId}",
@@ -188,7 +246,8 @@ class MainActivity : FragmentActivity() {
                                         onLogout = { navController.navigate("login") { popUpTo(navController.graph.id) { inclusive = true } } },
                                         onAdminPanelClick = { navController.navigate("admin") },
                                         onShowRewardedAd = { rewardedAdManager.showRewardedAd { viewModel.syncNewSongs() } },
-                                        onAboutClick = { navController.navigate("about") }
+                                        onAboutClick = { navController.navigate("about") },
+                                        onMusicSourceClick = { navController.navigate("change-source") }
                                     )
                                 }
                                 composable("admin") {

@@ -12,3 +12,12 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Python (yt-proxy backend)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/

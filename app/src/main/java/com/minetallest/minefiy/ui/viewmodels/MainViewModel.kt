@@ -8,6 +8,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -23,16 +24,30 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.minetallest.minefiy.b2.B2Manager
 import com.minetallest.minefiy.data.Artist
+import com.minetallest.minefiy.data.DataSource
 import com.minetallest.minefiy.data.SearchResult
 import com.minetallest.minefiy.data.Song
 import com.minetallest.minefiy.data.SongSelection
+import com.minetallest.minefiy.data.UserPreferencesManager
 import com.minetallest.minefiy.firebase.FirebaseManager
 import com.minetallest.minefiy.metadata.MetadataExtractor
 import com.minetallest.minefiy.playback.PlaybackService
 import com.minetallest.minefiy.playback.Playlist
 import com.minetallest.minefiy.sync.SyncManager
+import com.minetallest.minefiy.ytmusic.SearchTab
+import com.minetallest.minefiy.ytmusic.StreamResolver
+import com.minetallest.minefiy.ytmusic.YtAlbum
+import com.minetallest.minefiy.ytmusic.YtArtist
+import com.minetallest.minefiy.ytmusic.YtFilter
+import com.minetallest.minefiy.ytmusic.YtMusicApi
+import com.minetallest.minefiy.ytmusic.YtNotConfiguredException
+import com.minetallest.minefiy.ytmusic.YtSearchItem
+import com.minetallest.minefiy.ytmusic.YtSong
+import com.minetallest.minefiy.ytmusic.YtUiState
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -49,6 +64,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val firebaseManager = FirebaseManager()
     private val b2Manager = B2Manager()
     private val syncManager: SyncManager
+    private val prefsManager = UserPreferencesManager(application)
+    private val ytMusicApi = YtMusicApi()
+    private var ytSearchJob: Job? = null
 
     private val castContext: CastContext by lazy {
         CastContext.getSharedInstance(application)
@@ -130,6 +148,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _showNoInternetDialog = MutableStateFlow(false)
     val showNoInternetDialog: StateFlow<Boolean> = _showNoInternetDialog.asStateFlow()
+
+    // Primary source: B2 (own library) or YouTube Music. Null = onboarding not done.
+    private val _dataSource = MutableStateFlow<DataSource?>(prefsManager.getDataSource())
+    val dataSource: StateFlow<DataSource?> = _dataSource.asStateFlow()
+
+    // --- YouTube Music (Stage 3) ---
+    private val _searchTab = MutableStateFlow(SearchTab.LIBRARY)
+    val searchTab: StateFlow<SearchTab> = _searchTab.asStateFlow()
+
+    private val _ytFilter = MutableStateFlow(YtFilter.SONGS)
+    val ytFilter: StateFlow<YtFilter> = _ytFilter.asStateFlow()
+
+    private val _ytSearchState = MutableStateFlow<YtUiState<List<YtSearchItem>>>(YtUiState.Idle)
+    val ytSearchState: StateFlow<YtUiState<List<YtSearchItem>>> = _ytSearchState.asStateFlow()
+
+    private val _ytAlbumState = MutableStateFlow<YtUiState<YtAlbum>>(YtUiState.Idle)
+    val ytAlbumState: StateFlow<YtUiState<YtAlbum>> = _ytAlbumState.asStateFlow()
+
+    private val _ytArtistState = MutableStateFlow<YtUiState<YtArtist>>(YtUiState.Idle)
+    val ytArtistState: StateFlow<YtUiState<YtArtist>> = _ytArtistState.asStateFlow()
+
+    private val _ytMessage = MutableStateFlow<String?>(null)
+    val ytMessage: StateFlow<String?> = _ytMessage.asStateFlow()
+
+    val isYtConfigured: Boolean
+        get() = ytMusicApi.isConfigured
 
     private val connectivityManager =
         application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -268,6 +312,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _showNoInternetDialog.value = false
     }
 
+    fun setDataSource(source: DataSource) {
+        prefsManager.setDataSource(source)
+        _dataSource.value = source
+    }
+
+    fun needsDataSourceSelection(): Boolean = _dataSource.value == null
+
     fun isUserLoggedIn(): Boolean = firebaseManager.isUserLoggedIn()
 
     fun login(email: String, pass: String, onResult: (Result<Unit>) -> Unit) {
@@ -321,10 +372,177 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _newlyAddedSongs.value = emptyList()
         _listeningHistory.value = emptyList()
         _currentSong.value = null
+        ytSearchJob?.cancel()
+        _ytSearchState.value = YtUiState.Idle
+        _ytAlbumState.value = YtUiState.Idle
+        _ytArtistState.value = YtUiState.Idle
     }
 
     fun onSearchQueryChange(query: String) {
         _searchQuery.value = query
+        if (_searchTab.value == SearchTab.YOUTUBE) {
+            searchYouTube(query)
+        }
+    }
+
+    fun setSearchTab(tab: SearchTab) {
+        if (_searchTab.value == tab) return
+        _searchTab.value = tab
+        if (tab == SearchTab.YOUTUBE && _searchQuery.value.isNotBlank()) {
+            searchYouTube(_searchQuery.value)
+        }
+    }
+
+    fun setYtFilter(filter: YtFilter) {
+        if (_ytFilter.value == filter) return
+        _ytFilter.value = filter
+        val query = _searchQuery.value
+        if (query.isNotBlank()) searchYouTube(query)
+    }
+
+    /**
+     * Debounced YouTube search. Cancels any in-flight request so a fast typist
+     * never sees an older result overwrite a newer one.
+     */
+    fun searchYouTube(query: String) {
+        ytSearchJob?.cancel()
+        if (query.isBlank()) {
+            _ytSearchState.value = YtUiState.Idle
+            return
+        }
+        if (!ytMusicApi.isConfigured) {
+            _ytSearchState.value = YtUiState.NotConfigured
+            return
+        }
+        ytSearchJob = viewModelScope.launch {
+            delay(YT_SEARCH_DEBOUNCE_MS)
+            _ytSearchState.value = YtUiState.Loading
+            _ytSearchState.value = try {
+                val limit = YT_SEARCH_LIMIT
+                val items: List<YtSearchItem> = when (_ytFilter.value) {
+                    YtFilter.SONGS -> ytMusicApi.searchSongs(query, limit).map { YtSearchItem.Song(it) }
+                    YtFilter.ALBUMS -> ytMusicApi.searchAlbums(query, limit).map { YtSearchItem.Album(it) }
+                    YtFilter.ARTISTS -> ytMusicApi.searchArtists(query, limit).map { YtSearchItem.Artist(it) }
+                    YtFilter.PLAYLISTS -> ytMusicApi.searchPlaylists(query, limit).map { YtSearchItem.Playlist(it) }
+                }
+                rememberYtSongs(items.filterIsInstance<YtSearchItem.Song>().map { it.song })
+                YtUiState.Success(items)
+            } catch (e: YtNotConfiguredException) {
+                YtUiState.NotConfigured
+            } catch (e: Exception) {
+                Log.w("MainViewModel", "YouTube search failed", e)
+                YtUiState.Error(e.message ?: "YouTube Music search failed")
+            }
+        }
+    }
+
+    fun loadYtAlbum(browseId: String) {
+        if (!ytMusicApi.isConfigured) {
+            _ytAlbumState.value = YtUiState.NotConfigured
+            return
+        }
+        viewModelScope.launch {
+            _ytAlbumState.value = YtUiState.Loading
+            _ytAlbumState.value = try {
+                val album = ytMusicApi.getAlbum(browseId)
+                rememberYtSongs(album.tracks)
+                YtUiState.Success(album)
+            } catch (e: Exception) {
+                Log.w("MainViewModel", "Loading album $browseId failed", e)
+                YtUiState.Error(e.message ?: "Could not load this album")
+            }
+        }
+    }
+
+    fun loadYtArtist(channelId: String) {
+        if (!ytMusicApi.isConfigured) {
+            _ytArtistState.value = YtUiState.NotConfigured
+            return
+        }
+        viewModelScope.launch {
+            _ytArtistState.value = YtUiState.Loading
+            _ytArtistState.value = try {
+                val artist = ytMusicApi.getArtist(channelId)
+                rememberYtSongs(artist.topSongs)
+                YtUiState.Success(artist)
+            } catch (e: Exception) {
+                Log.w("MainViewModel", "Loading artist $channelId failed", e)
+                YtUiState.Error(e.message ?: "Could not load this artist")
+            }
+        }
+    }
+
+    /**
+     * Plays a YouTube Music track. The stream URL is deliberately not resolved
+     * here for local playback: [PlaybackService] resolves it in
+     * `onAddMediaItems`, exactly as it does for B2 keys. Cast has to resolve
+     * eagerly because the remote player needs a URL in the load request.
+     */
+    fun playYtSong(song: YtSong) {
+        rememberYtSongs(listOf(song))
+
+        if (castSession != null && castSession!!.isConnected) {
+            viewModelScope.launch {
+                try {
+                    val streamUrl = streamResolver.resolve(song.videoId)
+                    val mediaInfo = com.google.android.gms.cast.MediaInfo.Builder(streamUrl)
+                        .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED)
+                        .setContentType("audio/mp4")
+                        .setMetadata(
+                            com.google.android.gms.cast.MediaMetadata(
+                                com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MUSIC_TRACK
+                            ).apply {
+                                putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, song.title)
+                                putString(com.google.android.gms.cast.MediaMetadata.KEY_ARTIST, song.artist)
+                                putString(
+                                    com.google.android.gms.cast.MediaMetadata.KEY_ALBUM_NAME,
+                                    song.album ?: "YouTube Music"
+                                )
+                                song.artworkUrl?.let { url ->
+                                    addImage(com.google.android.gms.common.images.WebImage(Uri.parse(url)))
+                                }
+                            }
+                        )
+                        .build()
+                    castSession?.remoteMediaClient?.load(mediaInfo, true)
+                } catch (e: Exception) {
+                    Log.w("MainViewModel", "Casting ${song.videoId} failed", e)
+                    _ytMessage.value = e.message ?: "Could not cast this track"
+                }
+            }
+        } else {
+            val mediaController = mediaControllerFuture.get() ?: return
+            mediaController.setMediaItems(listOf(song.toMediaItem()), 0, 0)
+            mediaController.prepare()
+            mediaController.play()
+            _currentSong.value = song.toSong()
+        }
+    }
+
+    fun showYtMessage(message: String) {
+        _ytMessage.value = message
+    }
+
+    fun clearYtMessage() {
+        _ytMessage.value = null
+    }
+
+    /**
+     * Stream URLs are resolved on the device, never on yt-proxy: datacenter IPs
+     * are answered with "Sign in to confirm you're not a bot". See [StreamResolver].
+     */
+    private val streamResolver = StreamResolver()
+
+    /** YT tracks seen so far, keyed by `yt:<videoId>`, for the now-playing UI. */
+    private val ytSongsById = ConcurrentHashMap<String, YtSong>()
+
+    private fun rememberYtSongs(songs: List<YtSong>) {
+        songs.forEach { ytSongsById[it.mediaId] = it }
+    }
+
+    private companion object {
+        const val YT_SEARCH_LIMIT = 20
+        const val YT_SEARCH_DEBOUNCE_MS = 300L
     }
 
     private fun loadInitialData() {
@@ -571,9 +789,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _shuffleModeEnabled.value = mediaController.shuffleModeEnabled
         _repeatMode.value = mediaController.repeatMode
         _totalDuration.value = mediaController.duration.coerceAtLeast(0L)
-        mediaController.currentMediaItem?.mediaId?.let {
-            val song = _songs.value.find { song -> song.key == it }
-            _currentSong.value = song
+        mediaController.currentMediaItem?.mediaId?.let { mediaId ->
+            _currentSong.value = if (YtSong.isYouTubeMediaId(mediaId)) {
+                ytSongsById[mediaId]?.toSong()
+            } else {
+                _songs.value.find { song -> song.key == mediaId }
+            }
         }
     }
 
@@ -603,17 +824,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Deliberately carries no URI: [PlaybackService.onAddMediaItems] resolves the
+     * real stream (presigned B2 URL or YouTube URL) asynchronously. The previous
+     * `setUri(artworkUrl)` made ExoPlayer try to play a JPEG whenever the service
+     * failed to override it, and `Uri.parse(null)` could throw.
+     */
     private fun Song.toMediaItem(): MediaItem {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(this.title)
+            .setArtist(this.artist)
+            .setAlbumTitle(this.album)
+        this.artworkUrl?.takeIf { it.isNotBlank() }?.let { metadata.setArtworkUri(Uri.parse(it)) }
         return MediaItem.Builder()
-            .setUri(artworkUrl ?: "")
             .setMediaId(this.key)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(this.title)
-                    .setArtist(this.artist)
-                    .setArtworkUri(Uri.parse(artworkUrl))
-                    .build()
-            )
+            .setMediaMetadata(metadata.build())
+            .build()
+    }
+
+    private fun YtSong.toMediaItem(): MediaItem {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(this.title)
+            .setArtist(this.artist)
+            .setAlbumTitle(this.album ?: "YouTube Music")
+        this.artworkUrl?.takeIf { it.isNotBlank() }?.let { metadata.setArtworkUri(Uri.parse(it)) }
+        return MediaItem.Builder()
+            .setMediaId(this.mediaId)
+            .setMediaMetadata(metadata.build())
             .build()
     }
 

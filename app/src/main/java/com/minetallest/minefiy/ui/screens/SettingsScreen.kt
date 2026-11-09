@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.SupportAgent
@@ -44,19 +45,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.minetallest.minefiy.data.DataSource
 import com.minetallest.minefiy.ui.viewmodels.MainViewModel
 
 @Composable
 fun SettingsScreen(
-    viewModel: MainViewModel, 
-    onLogout: () -> Unit, 
+    viewModel: MainViewModel,
+    onLogout: () -> Unit,
     onAdminPanelClick: () -> Unit,
     onShowRewardedAd: () -> Unit,
-    onAboutClick: () -> Unit // Added onAboutClick parameter
+    onAboutClick: () -> Unit, // Added onAboutClick parameter
+    onMusicSourceClick: () -> Unit
 ) {
     val userEmail by viewModel.userEmail.collectAsState()
     val displayName by viewModel.displayName.collectAsState()
     val isAdmin by viewModel.isAdmin.collectAsState()
+    val dataSource by viewModel.dataSource.collectAsState()
     val context = LocalContext.current
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -86,6 +90,18 @@ fun SettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+
+            // Music Source
+            val sourceLabel = when (dataSource) {
+                DataSource.B2 -> "Your Library (B2)"
+                DataSource.YOUTUBE_MUSIC -> "YouTube Music"
+                null -> "Select..."
+            }
+            SettingsItem(
+                icon = Icons.Default.LibraryMusic,
+                title = "Music Source: $sourceLabel",
+                onClick = onMusicSourceClick
+            )
 
             // Settings Items
             SettingsItem(

@@ -1,6 +1,7 @@
 package com.minetallest.minefiy.playback
 
 import android.os.Bundle
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -15,6 +16,8 @@ import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.ListenableFuture
 import com.minetallest.minefiy.R
 import com.minetallest.minefiy.b2.B2Manager
+import com.minetallest.minefiy.ytmusic.StreamResolver
+import com.minetallest.minefiy.ytmusic.YtSong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,7 +34,23 @@ class PlaybackService : MediaSessionService() {
         B2Manager()
     }
 
+    private val streamResolver: StreamResolver by lazy {
+        StreamResolver()
+    }
+
     private var currentPlaylist: Playlist? = null
+
+    /**
+     * B2 items resolve to a presigned URL; YouTube items (`yt:<videoId>`) are
+     * resolved on-device through InnerTube — see [StreamResolver] for why that
+     * must not happen on the backend.
+     */
+    private suspend fun streamUrlFor(mediaId: String): String =
+        if (YtSong.isYouTubeMediaId(mediaId)) {
+            streamResolver.resolve(YtSong.videoIdFromMediaId(mediaId))
+        } else {
+            b2Manager.getPresignedUrl(mediaId)
+        }
 
     @UnstableApi
     private val callback = object : MediaSession.Callback {
@@ -39,14 +58,17 @@ class PlaybackService : MediaSessionService() {
             val updatedMediaItems = serviceScope.future {
                 mediaItems.map { mediaItem ->
                     try {
-                        val streamUrl = b2Manager.getPresignedUrl(mediaItem.mediaId)
+                        val streamUrl = streamUrlFor(mediaItem.mediaId)
                         MediaItem.Builder()
                             .setUri(streamUrl)
                             .setMediaId(mediaItem.mediaId)
                             .setMediaMetadata(mediaItem.mediaMetadata)
                             .build()
                     } catch (e: Exception) {
-                        mediaItem // Keep the original if fetching fails
+                        // Keep the original (URI-less) item so ExoPlayer surfaces
+                        // a playback error instead of silently playing nothing.
+                        Log.w("PlaybackService", "Could not resolve stream for ${mediaItem.mediaId}", e)
+                        mediaItem
                     }
                 }.toMutableList()
             }
